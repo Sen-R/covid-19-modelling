@@ -5,22 +5,64 @@ from scipy.optimize import minimize_scalar
 from scipy.stats import linregress, gamma
 from collections import namedtuple
 
-class SEIR(namedtuple('SEIR', ['S', 'E', 'I', 'R'])):
-    @staticmethod
-    def make_state(S=0, E=0, I=0, R=0):
-        return SEIR(S=S, E=E, I=I, R=R)
+class SEIR:
+    def __init__(self, a):
+        self._a = a
+        self.state_shape = a.shape[1:]
 
     @staticmethod
-    def from_a(a):
-        return SEIR(*a)
+    def make_state(S, E=None, I=None, R=None):
+        if E is None:
+            E = np.zeros_like(S)
+        if I is None:
+            I = np.zeros_like(S)
+        if R is None:
+            R = np.zeros_like(S)
+        a = np.stack((S, E, I, R))
+        return SEIR(a)
 
-    def to_a(self):
-        return np.array([*self])
+    @staticmethod
+    def from_vector(v, state_shape):
+        return SEIR(v.reshape(4, *state_shape))
+
+    def __repr__(self):
+        return "SEIR(S={}, E={}, I={}, R={})".format(repr(self.S), repr(self.E),
+                                                     repr(self.I), repr(self.R))
+    
+    @property
+    def S(self):
+        return self._a[0]
+
+    @property
+    def E(self):
+        return self._a[1]
+
+    @property
+    def I(self):
+        return self._a[2]
+
+    @property
+    def R(self):
+        return self._a[3]
+
+    @property
+    def vector(self):
+        return self._a.ravel()
+
+    @property
+    def is_scalar(self):
+        return (np.ndim(self._a[0])==0)
 
     @property
     def state_labels(self):
-        return self._fields
+        return ['S', 'E', 'I', 'R']
 
+    def to_dict(self):
+        """
+        Returns dict representation of the state
+        """
+        return dict([*zip(['S', 'E', 'I', 'R'], self._a)])
+    
 class SEIRModel:
     def __init__(self,
                  initial_state,
@@ -31,14 +73,21 @@ class SEIRModel:
                  mean_generation_time=None,
                  lat_fraction=None):
         #TODO: input validation
-        alt_parm = R_0 is None or T_inc is None or T_inf is None
-        std_parm = (early_growth_rate is None or mean_generation_time is None or
-                    lat_fraction is None)
+        std_parm = ((R_0 is not None) and (T_inc is not None) and
+                    (T_inf is not None))
+        alt_parm = ((early_growth_rate is not None) and
+                    (mean_generation_time is not None) and
+                    (lat_fraction is not None))
         if not (alt_parm or std_parm):
             raise ValueError('You have to either provide all of R_0, T_inc '
                              'and T_inf or all of early_growth_rate, '
                              'mean_generation_time and lat_frac')
         if alt_parm:
+            if not initial_state.is_scalar:
+                raise NotImplementedError('Currently can only parameterise a '
+                                          'multi (tensor-valued) state model '
+                                          'in terms of an R_0 matrix, T_inc '
+                                          'and T_inf')
             params = SEIRModel.calibrate_parameters(early_growth_rate,
                                                     mean_generation_time,
                                                     lat_fraction)
@@ -79,6 +128,16 @@ class SEIRModel:
     def reset_cache(self):
         self._path = None
 
+    @property
+    def initial_state(self):
+        return self._initial_state
+
+    @initial_state.setter
+    def initial_state(self, value):
+        self._state_shape = value.state_shape
+        self._initial_state = value
+        self.reset_cache()
+
     @staticmethod
     def calibrate_parameters(early_growth_rate,
                              mean_generation_time,
@@ -96,32 +155,52 @@ class SEIRModel:
         return {'R_0':R_0, 'T_inc':T_inc, 'T_inf':T_inf}
          
     def _ydot(self, t, y):
-        y = SEIR.from_a(y)
+        y = SEIR.from_vector(y, self._state_shape)
         N = y.S + y.E + y.I + y.R
-        beta = self.R_0(t) / (N * self.T_inf)
-        Sd = -beta * y.S * y.I
-        Ed = beta * y.S * y.I - y.E / self.T_inc
+        lambda_ = np.tensordot(self.R_0(t), y.I / (N * self.T_inf),
+                               len(y.state_shape))
+        Sd = - lambda_ * y.S
+        Ed = lambda_ * y.S - y.E / self.T_inc
         Id = y.E / self.T_inc - y.I / self.T_inf
-        Rd = y.I / self.T_inf        
-        return SEIR.make_state(S=Sd, E=Ed, I=Id, R=Rd).to_a()
+        Rd = y.I / self.T_inf
+        return SEIR.make_state(S=Sd, E=Ed, I=Id, R=Rd).vector
 
     def predict(self, sim_days, T_start=0):
-        if (self._path is not None and len(self._path)>sim_days):
-            # Use cached result if possible
-            result = self._path.iloc[:sim_days+1]
-            result.index = result.index - result.index[0] + T_start
-            return result
-        else:
-            sim_days = int(sim_days)
-            t_eval = np.linspace(T_start, T_start+sim_days, sim_days+1)
-            ivp = solve_ivp(self._ydot, (0, sim_days),
-                            self.initial_state.to_a(), t_eval=t_eval)
-            if ivp.status != 0:
-                print(ivp.message)
-            self._path = pd.DataFrame(ivp.y.T,
-                                      index=ivp.t,
-                                      columns=self.initial_state.state_labels)
-            return self._path.copy()
+        """
+        Run the simulation if not already cached and return result
+        formatted as DataFrame.
+        """
+        if self._path is None or len(self._path) < (sim_days + 1):
+            self.simulate(sim_days)
+        path = self._path.reshape((sim_days+1, 4, *self._state_shape))
+        result = {'t': self._t[:sim_days+1] - self._t[0] + T_start}
+        result.update([*zip(['S', 'E', 'I', 'R'],
+                            path[:sim_days+1].swapaxes(0,1))])
+        return result
+        
+    def simulate(self, sim_days):
+        """
+        Runs the simulation and stores the result. Does not return
+        anything.
+        """
+        sim_days = int(sim_days)
+        t_eval = np.linspace(0, sim_days, sim_days+1)
+        ivp = solve_ivp(self._ydot, (0, sim_days),
+                        self.initial_state.vector, t_eval=t_eval)
+        if ivp.status != 0:
+            print(ivp.message)
+        self._path = ivp.y.T
+        self._t = ivp.t
+    
+    def _path_as_df(self):
+        """
+        Converts the raw path (stored as a multidimensional numpy array)
+        into a DataFrame.
+        """
+        data = [pd.Series(SEIR.from_vector(s, self._state_shape).to_dict())
+                for s in self._path]
+        return pd.DataFrame(data, index=self._t,
+                            columns=self.initial_state.state_labels)
     
 class SEIRObsModel(SEIRModel):
     def __init__(self, f_cdr, f_cfr, cv_detect, T_detect, cv_resolve, T_resolve,
@@ -214,8 +293,10 @@ class SEIRObsModel(SEIRModel):
         if self._fullpath is not None and len(self._fullpath)>sim_days:
             sim =  self._fullpath.iloc[:sim_days+1]
         else:
-            sim = super().predict(sim_days)
-            sim['All exposed'] = sim.E + sim.I + sim.R
+            seir_path = super().predict(sim_days)
+            sim = pd.Series(seir_path['E'] + seir_path['I'] + seir_path['R'],
+                            index=seir_path['t'],
+                            name='All exposed').to_frame()
             sim['Daily exposed'] = sim['All exposed'].diff()
             sim['Daily exposed'].iloc[0] = 0.
             sim['Daily cases'] = dp_convolve(sim['Daily exposed'],
