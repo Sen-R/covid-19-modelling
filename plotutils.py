@@ -41,8 +41,9 @@ def plot_simulations(sims, observations, ax=None):
                  dashes = ['', (2, 4)])
     ax.plot([], [], ' ', label='OBSERVATIONS')
     ax.set_prop_cycle(None)
-    observations[['confirmed', 'deaths']].plot(ax=ax,
-                                               marker='x', ls='')
+    observations[['All cases', 'All deaths', 'Daily new cases',
+                  'Daily deaths']].plot(ax=ax, marker='o', ls='',
+                                        markersize=2)
     ax.set_yscale('log')
     ax.set_ylim(1, None)
     ax.yaxis.set_major_locator(ticker.LogLocator(10., (1.,), 15, 15))
@@ -95,9 +96,9 @@ def explore_simulation(initial_growth_rate,
                              mean_generation_time = serial_interval,
                              lat_fraction = latent_fraction,
                              initial_state = SEIR.make_state(S=6.64e7, I=1))
-    unc_model.fit(observations.confirmed[observations['phase']=='unrestricted'],
-                  observations.recovered[observations['phase']=='unrestricted'],
-                  observations.deaths[observations['phase']=='unrestricted'],
+    unc_model.fit(observations['All cases'][observations['phase']=='unrestricted'],
+                  observations['All recovered'][observations['phase']=='unrestricted'],
+                  observations['All deaths'][observations['phase']=='unrestricted'],
                   7*sim_time_weeks, weights=weights)
     sim_baseline = unc_model.predict(7*sim_time_weeks)
     ld_model = SEIRObsModel(f_cdr, f_cfr, cv_detect, T_detect, cv_resolve,
