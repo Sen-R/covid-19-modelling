@@ -22,6 +22,11 @@ def sims_to_longform(sims):
     result['PROJECTION'] = result['PROJECTION'].astype('category')
     return result
 
+def pivot_plot_data(plot_data):
+    plot_data = plot_data.set_index(['Date', 'SIMULATION NAME', 'PROJECTION'])
+    plot_data = plot_data.squeeze().rename(None)
+    plot_data = plot_data.unstack(['SIMULATION NAME', 'PROJECTION'])
+    return plot_data
 
 def plot_simulations(sims, observations, ax=None):
     if ax is None:
@@ -49,7 +54,7 @@ def plot_simulations(sims, observations, ax=None):
     ax.set_ylabel('')
     ax.set_xlabel('Date')
     #plt.xticks(rotation=90)
-    return plot_data
+    return pivot_plot_data(plot_data)
 
 def explore_simulation(initial_growth_rate,
 		       serial_interval,
