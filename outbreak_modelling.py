@@ -238,10 +238,6 @@ class SEIRObsModel(SEIRModel):
         self._fullpath = None
         super().reset_cache()
         
-    def score(self, day_zero, cases, recovered, deaths, weights=None,
-              predictions=None):
-        raise NotImplementedError()
-
     def fit(self, cases, recovered, deaths, sim_days, obs_threshold=10,
             weights=None):
         """
@@ -249,6 +245,30 @@ class SEIRObsModel(SEIRModel):
         deaths. Weights is a 3-tuple specifying the relative weights to
         place on case data, recovery data and death data respectively when
         calculating the score.
+        """
+        self._fit_score_inner(cases, recovered, deaths, sim_days,
+                              obs_threshold, weights, fit=True)
+        return self
+
+    def score(self, cases, recovered, deaths, sim_days, obs_threshold=10,
+              weights=None):
+        return self._fit_score_inner(cases, recovered, deaths, sim_days,
+                                     obs_threshold, weights, fit=False)
+
+    def fit_score(self, cases, recovered, deaths, sim_days, obs_threshold=10,
+                  weights=None):
+        return self._fit_score_inner(cases, recovered, deaths, sim_days,
+                                     obs_threshold, weights, fit=True)
+
+    def _fit_score_inner(self, cases, recovered, deaths, sim_days,
+                         obs_threshold=10, weights=None, fit=True):
+        """
+        Fit day 0 of the simulation to observed cases, recovered and 
+        deaths. Weights is a 3-tuple specifying the relative weights to
+        place on case data, recovery data and death data respectively when
+        calculating the score.
+
+        This function returns the score.
         """
         if self._fullpath is None:
             self.predict(sim_days)
@@ -274,20 +294,23 @@ class SEIRObsModel(SEIRModel):
             
         def score(days_shift):
             result = (w_c * error_ts(days_shift, cases,
-                                   self._fullpath['All cases']) +
-                    w_r * error_ts(days_shift, recovered,
-                                   self._fullpath['All recovered']) +
-                    w_d * error_ts(days_shift, deaths,
-                                   self._fullpath['All deaths']))
-            return result
+                                     self._fullpath['All cases']) +
+                      w_r * error_ts(days_shift, recovered,
+                                     self._fullpath['All recovered']) +
+                      w_d * error_ts(days_shift, deaths,
+                                     self._fullpath['All deaths']))
+            return result / total_weight
 
-        opt = minimize_scalar(score)
-        if not opt.success:
-            print(opt)
-            raise RuntimeError('Optimiser failed')
-        opt_shift = round(opt.x)
-        self.start_date -= opt_shift * self._offset
-        return self
+        if not fit:
+            return score(0)
+        else:
+            opt = minimize_scalar(score)
+            if not opt.success:
+                print(opt)
+                raise RuntimeError('Optimiser failed')
+            opt_shift = round(opt.x)
+            self.start_date -= opt_shift * self._offset
+            return opt.fun
     
     def predict(self, sim_days):
         if self._fullpath is not None and len(self._fullpath)>sim_days:
