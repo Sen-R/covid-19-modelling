@@ -18,7 +18,7 @@ def single_country_data(data, country, unrestricted_dates):
     ts = ts.set_index('statistic').drop(['Province/State', 'Country/Region', 'Lat', 'Long'], axis=1).T
     ts.index.name='Date'
     ts.index = pd.to_datetime(ts.index)
-    ts['Active_cases'] = (ts['All cases'] - ts['All deaths'] -
+    ts['Active cases'] = (ts['All cases'] - ts['All deaths'] -
                           ts['All recovered'])
     ts['Daily new cases'] = ts['All cases'].diff().fillna(0)
     ts['Daily deaths'] = ts['All deaths'].diff().fillna(0)
@@ -31,3 +31,22 @@ def single_country_data(data, country, unrestricted_dates):
     ts['phase'].fillna(method='ffill', inplace=True)
     ts['phase'] = pd.Categorical(ts['phase'])
     return ts
+
+def load_uk_data():
+    """ Load data from https://github.com/tomwhite/covid-19-uk-data """
+    twd = pd.read_csv('twdata/data/covid-19-indicators-uk.csv')
+    twd['Date'] = pd.to_datetime(twd['Date'])
+    twd = twd.set_index(['Date', 'Country', 'Indicator']).squeeze().rename(None)
+    twd = twd.unstack(['Indicator']).rename_axis(None, axis=1)
+    twd.rename({'ConfirmedCases':'All cases',
+                'Deaths':'All deaths',
+                'Tests':'All tests'},
+               axis=1, inplace=True)
+    for dk, ak in zip(['Daily new cases', 'Daily deaths', 'Daily tests'],
+                      ['All cases', 'All deaths', 'All tests']):
+        differ = lambda s: pd.Series(np.diff(s, axis=0, prepend=0),
+                                     index=s.index,
+                                     name=s.name)
+        twd[dk] = twd.groupby(level='Country')[ak].apply(differ)
+    twd = twd.reset_index()
+    return twd
