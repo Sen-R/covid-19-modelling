@@ -37,7 +37,7 @@ def plot_simulations(sims, observations, ax=None):
                  x='Date', y='Value', hue='PROJECTION',
                  style='SIMULATION NAME',
                  hue_order=['All cases', 'All deaths',
-                            'Daily cases', 'Daily deaths'],
+                            'Daily new cases', 'Daily deaths'],
                  dashes = ['', (2, 4)])
     ax.plot([], [], ' ', label='OBSERVATIONS')
     ax.set_prop_cycle(None)
