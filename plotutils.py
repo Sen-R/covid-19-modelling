@@ -33,16 +33,16 @@ def plot_simulations(sims, observations, ax=None):
         _, ax = plt.subplots(1, 1, figsize=(12, 8))
     plt.sca(ax)
     plot_data = sims_to_longform(sims)
+    plot_what = ['All cases', 'All deaths', 'Daily new cases', 'Daily deaths']
     sns.lineplot(data=plot_data,
                  x='Date', y='Value', hue='PROJECTION',
                  style='SIMULATION NAME',
-                 hue_order=['All cases', 'All deaths',
-                            'Daily new cases', 'Daily deaths'],
+                 hue_order=plot_what,
                  dashes = ['', (2, 4)])
     ax.plot([], [], ' ', label='OBSERVATIONS')
     ax.set_prop_cycle(None)
-    observations[['All cases', 'All deaths', 'Daily new cases',
-                  'Daily deaths']].plot(ax=ax, marker='o', ls='',
+    observations = observations.set_index('Date')
+    observations[plot_what].plot(ax=ax, marker='o', ls='',
                                         markersize=2)
     ax.set_yscale('log')
     ax.set_ylim(1, None)
