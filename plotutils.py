@@ -7,6 +7,7 @@ import seaborn as sns
 from ipywidgets import interactive, FloatSlider, fixed, Text, BoundedIntText
 from ipywidgets import Layout, Dropdown
 from outbreak_modelling import *
+from datautils import dt_to_number, number_to_dt
 
 def sims_to_longform(sims):
     """
@@ -60,20 +61,21 @@ def plot_simulations(sims, observations, ax=None):
 def explore_simulation(initial_growth_rate,
 		       serial_interval,
 		       latent_fraction,
-		       f_cdr, f_cfr,
-		       T_detect, T_resolve, T_death,
-		       cv_detect, cv_resolve, cv_death,
+		       cdr, cfr,
+		       T_detect, T_recover, T_death,
+		       cv_detect, cv_recover, cv_death,
 		       R_0_lockdown,
                        lockdown_release_date,
                        lockdown_release_timeframe_weeks,
                        sim_time_weeks,
                        weights,
-                       observations):
+                       observations,
+                       day_zero):
     initial_growth_rate /= 100
-    f_cdr /= 100
-    f_cfr /= 100
+    cdr /= 100
+    cfr /= 100
     cv_detect /= 100
-    cv_resolve /= 100
+    cv_recover /= 100
     cv_death /= 100
     
     try:
@@ -89,46 +91,38 @@ def explore_simulation(initial_growth_rate,
         print('Lockdown cannot be released before April 2020')
         return
 
-    unc_model = SEIRObsModel(f_cdr, f_cfr, cv_detect, T_detect, cv_resolve,
-                             T_resolve, cv_death, T_death,
-                             start_date = "2020/02/01",
-                             early_growth_rate = initial_growth_rate,
-                             mean_generation_time = serial_interval,
-                             lat_fraction = latent_fraction,
-                             initial_state = SEIR.make_state(S=6.64e7, I=1))
-    unc_model.fit(observations['All cases'][observations['phase']=='unrestricted'],
-                  observations['All recovered'][observations['phase']=='unrestricted'],
-                  observations['All deaths'][observations['phase']=='unrestricted'],
-                  7*sim_time_weeks, weights=weights)
-    sim_baseline = unc_model.predict(7*sim_time_weeks)
-    ld_model = SEIRObsModel(f_cdr, f_cfr, cv_detect, T_detect, cv_resolve,
-                            T_resolve, cv_death, T_death,
-                             start_date = unc_model.start_date,
-                             early_growth_rate = initial_growth_rate,
-                             mean_generation_time = serial_interval,
-                             lat_fraction = latent_fraction,
-                             initial_state = SEIR.make_state(S=6.64e7, I=1))
-    R_0_ld = piecewise_linear_R_0_profile(['2020/03/10', '2020/03/26',
-                                           lockdown_release_date,
-                                           lockdown_release_end],
-                                          [unc_model.R_0(0),
-                                           R_0_lockdown, R_0_lockdown,
-                                           unc_model.R_0(0)],
-                                          sim_baseline)
+    SEIRObs_parameters = SEIRModel.calibrate_parameters(initial_growth_rate,
+                                                        serial_interval,
+                                                        latent_fraction)
+    SEIRObs_parameters.update({'cdr': cdr, 'cfr': cfr,
+                               'cv_detect': cv_detect, 'T_detect': T_detect,
+                               'cv_recover': cv_recover, 'T_recover': T_recover,
+                               'cv_death': cv_death, 'T_death': T_death,
+                               'initial_state': SEIR.make_state(S=6.64e7, I=1),
+                               'T_start':0})
+    ld_model = SEIRObsModel(**SEIRObs_parameters)
+    R_0_ld = pw_linear_fn(dt_to_number(pd.to_datetime(['2020/03/10',
+                                                       '2020/03/26',
+                                                       lockdown_release_date,
+                                                       lockdown_release_end]),
+                                       day_zero),
+                          [ld_model.R_0(0), R_0_lockdown, R_0_lockdown,
+                           ld_model.R_0(0)])
     ld_model.R_0 = R_0_ld
-    sim_ld = ld_model.predict(7*sim_time_weeks)
-    assert ((sim_baseline.index - sim_ld.index).to_series().dt.days==0).all()
+    ld_model.fit(observations['Daily new cases'], None,
+                 observations['Daily deaths'], weights=weights)
+    sim_ld = pd.DataFrame(ld_model.simulate(7*sim_time_weeks)).set_index('t')
+    sim_ld.index = number_to_dt(sim_ld.index, day_zero).rename('Date')
     _, (axt, axb) = plt.subplots(2, 1, figsize=(12, 16),
                                  gridspec_kw={'height_ratios': [1, 3]})
     plt.sca(axt)
-    plt.plot(sim_baseline.index, R_0_ld(range(len(sim_baseline))))
+    plt.plot(sim_ld.index, R_0_ld(dt_to_number(sim_ld.index, day_zero)))
     plt.ylim(0, None)
     plt.ylabel('$R_0(t)$')
     plt.xlabel('Date')
     plt.xticks(rotation=90)
     plt.title('$R_0$ profile')
-    plot_data = plot_simulations({'UK lockdown': sim_ld,
-                                  'Unconstrained baseline': sim_baseline},
+    plot_data = plot_simulations({'UK lockdown': sim_ld},
                                  observations,
                                  ax=axb)
     axb.set_title('Projections')
@@ -153,19 +147,19 @@ def my_text_box(value, mymin, mymax, step, description):
                           description=description,
                           style={'description_width': 'initial'})
 
-def interactive_simulation(observations):
+def interactive_simulation(observations, day_zero):
     return interactive(explore_simulation,
                        {'manual':True},
                        initial_growth_rate = my_slider(26, 5, 50, 1, 'Initial growth rate, %'),
                        serial_interval = my_slider(6.5, 2, 10, 0.5, 'Mean serial interval, days'),
                        latent_fraction = my_slider(0.71, 0.1, 0.9, 0.1, 'Latent period fraction'),
-                       f_cdr = my_slider(4.4, 0.1, 10, 0.1, 'Case detection rate, %'),
-                       f_cfr = my_slider(33, 1, 100, 1, 'Case fatality rate, %'),
+                       cdr = my_slider(4.4, 0.1, 10, 0.1, 'Case detection rate, %'),
+                       cfr = my_slider(33, 1, 100, 1, 'Case fatality rate, %'),
                        T_detect = my_slider(11, 1, 30, 1, 'Time to detection, days'),
-                       T_resolve = my_slider(9, 1, 30, 1, 'Time to recovery, days'),
+                       T_recover = my_slider(9, 1, 30, 1, 'Time to recovery, days'),
                        T_death = my_slider(10, 1, 56, 1, 'Time to death, days'),
                        cv_detect = my_slider(33, 1, 99, 1, 'Detection time variability, %'),
-                       cv_resolve = my_slider(33, 1, 99, 1, 'Recovery time variability, %'),
+                       cv_recover = my_slider(33, 1, 99, 1, 'Recovery time variability, %'),
                        cv_death = my_slider(20, 1, 99, 1, 'Death time variability, %'),
 		       R_0_lockdown = my_slider(1.2, 0.1, 4, 0.1, '$R_0$ during lockdown'),
                        lockdown_release_date = Text(value='2020/06/30',
@@ -180,5 +174,6 @@ def interactive_simulation(observations):
                                                     [.5, 0, .5])],
                                           description='Fit to ',
                                           style={'description_width': 'initial'}),
-                       observations = fixed(observations))
+                       observations = fixed(observations),
+                       day_zero = fixed(day_zero))
 
