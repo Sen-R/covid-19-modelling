@@ -263,36 +263,49 @@ class SEIRObsModel(SEIRModel):
         return score / w_total
 
     def fit_score(self, cases, recovered, deaths, params_to_vary=None,
-                  obs_threshold=10, weights=None):
+                  obs_threshold=10, weights=None, parameterizer=None):
         """
         params_to_vary should be a dict with keys that are the parameters
-        to vary and values that are (min, max) bounds.
+        to vary and values that are a nested tuple of the form
+        (initial_value, (min, max)).
+
+        parameterizer is a callable that takes these parameters and produces
+        a dict of standardised parameters for this class, that can be used
+        with self.set_params. Calling parameterizer with an empty dictionary
+        should cause it to set the model to its initial values.
         """
         cases = self._series_to_tuple_if_applicable(cases)
         recovered = self._series_to_tuple_if_applicable(recovered)
         deaths = self._series_to_tuple_if_applicable(deaths)
         
         if params_to_vary is None:
-            params_to_vary = {'T_start':(-30, 30)}
+            if parameterizer is not None:
+                raise ValueError('params_to_vary must be set when using a '
+                                 'custom parameterizer')
+            params_to_vary = {'T_start':(0, (-30, 30))}
+
+        if parameterizer is None:
+            parameterizer = lambda d: d
 
         params_names = list(params_to_vary.keys())
-        params_bounds = list(params_to_vary.values())
+        params_0 = [v[0] for v in params_to_vary.values()]
+        params_bounds = [v[1] for v in params_to_vary.values()]
+
         def optimisee(params_values):
-            self.set_params(dict(zip(params_names, params_values)))
+            new_params = parameterizer(dict(zip(params_names, params_values)))
+            self.set_params(new_params)
             return self._score(cases, recovered, deaths, obs_threshold, weights)
         
-        current_params = self.get_params()
-        params_0 = [current_params[n] for n in params_names]
         opt = minimize(optimisee, params_0, bounds=params_bounds)
         if not opt.success:
             print(opt.message)
-        self.set_params(dict(zip(params_names, opt.x)))
-        return opt.fun
+        self.set_params(parameterizer(dict(zip(params_names, opt.x))))
+        return opt.fun, dict(zip(params_names, opt.x))
 
     def fit(self, cases, recovered, deaths, params_to_vary=None,
-            obs_threshold=10, weights=None):
+            obs_threshold=10, weights=None, parameterizer=None):
         self.fit_score(cases, recovered, deaths, params_to_vary,
-                       obs_threshold, weights)
+                       obs_threshold, weights, parameterizer)
         return self
 
 def dg_weights(n, mean, n_days):
@@ -314,3 +327,16 @@ def log_error(y_obs, y_pred, obs_threshold):
         return 0.
     return np.sum(np.abs(np.log((obs_threshold + y_pred)/
                                 (obs_threshold + y_obs))))
+def pw_linear_fn(ts, values):
+    return lambda t : np.interp(t, ts, values)
+
+def pw_const_fn(ts, values):
+    if len(values) != len(ts)+1:
+        raise ValueError('Lengths of values and dts are not '
+                         'consistent')
+    def f(t):
+        conds = [t<ts[0]]
+        conds += [(t>=l) & (t<r) for l, r in zip(ts[:-1], ts[1:])]
+        conds += [t>=ts[-1]]
+        return np.piecewise(t, conds, values)
+    return f
