@@ -50,3 +50,9 @@ def load_uk_data():
         twd[dk] = twd.groupby(level='Country')[ak].apply(differ)
     twd = twd.reset_index()
     return twd
+
+def dt_to_number(dts, day_zero):
+    return (dts - day_zero)/pd.Timedelta(1, 'D')
+
+def number_to_dt(ts, day_zero):
+    return day_zero + ts*pd.Timedelta(1, 'D')
