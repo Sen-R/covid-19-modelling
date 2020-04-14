@@ -233,6 +233,22 @@ class SEIRObsModel(SEIRModel):
                            self._series_to_tuple_if_applicable(deaths),
                            obs_threshold, weights)
 
+    def impact(self, control_fn, T_end):
+        if T_end <= self.T_start:
+            raise ValueError('T_end should be after T_start')
+        T_span = ceil(T_end - self.T_start)
+        T_end = T_span + self.T_start
+        t_eval = np.linspace(self.T_start, T_end, T_span+1)
+        impact = {'t': t_eval, 'control': control_fn(t_eval)}
+        impact['marginal_change'] = np.abs(np.diff(impact['control'],
+                                                   axis=0,
+                                                   prepend=control_fn(t_eval[0])))
+        impact['case_impact'] = dp_convolve(impact['marginal_change'],
+                                            self.p_detect/self.cdr)
+        impact['deaths_impact'] = dp_convolve(impact['case_impact'],
+                                              self.p_death/self.cfr)
+        return impact        
+
     @staticmethod
     def _series_to_tuple_if_applicable(s):
         if s is None:
