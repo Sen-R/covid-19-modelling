@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+from scipy.stats.mstats import gmean
 
 def load_data():
     data = {'All cases': 'jhdata/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv',
@@ -32,7 +33,7 @@ def single_country_data(data, country, unrestricted_dates):
     ts['phase'] = pd.Categorical(ts['phase'])
     return ts
 
-def load_uk_data():
+def load_uk_data_tw():
     """ Load data from https://github.com/tomwhite/covid-19-uk-data """
     twd = pd.read_csv('twdata/data/covid-19-indicators-uk.csv')
     twd['Date'] = pd.to_datetime(twd['Date'])
@@ -50,6 +51,24 @@ def load_uk_data():
         twd[dk] = twd.groupby(level='Country')[ak].apply(differ)
     twd = twd.reset_index()
     return twd
+
+def load_uk_data():
+    """ Load local (manually updated) data from UK Government"""
+    cases = pd.read_csv('srdata/uk-cases.csv', parse_dates=['Date'])
+    cases = cases[cases.Pillar == 'Pillar 1'].drop('Pillar', axis=1)
+    cases = cases.set_index('Date')
+    deaths = pd.read_csv('srdata/uk-deaths.csv', parse_dates=['Date'],
+                         index_col=['Date'])
+    srd = deaths.join(cases, how='outer')
+    srd = srd.rename({'Deaths': 'Daily deaths',
+                      'Cumulative Deaths': 'All deaths',
+                      'Cases': 'Daily new cases'},
+                     axis=1)
+    srd['All cases'] = srd['Daily new cases'].cumsum()
+    srd['New cases 7-day mean'] = srd['Daily new cases'].rolling(7, center = True).apply(gmean)
+    srd['Deaths 7-day mean'] = srd['Daily deaths'].rolling(7, center = True).apply(gmean)
+    srd['Country'] = 'UK'
+    return srd.reset_index()
 
 def dt_to_number(dts, day_zero):
     return (dts - day_zero)/pd.Timedelta(1, 'D')

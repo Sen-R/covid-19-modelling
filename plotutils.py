@@ -42,7 +42,9 @@ def plot_simulations(sims, observations, ax=None):
                  dashes = ['', (2, 4)])
     ax.plot([], [], ' ', label='OBSERVATIONS')
     ax.set_prop_cycle(None)
-    observations = observations.set_index('Date')
+    #plot_what = ['All cases', 'All deaths', 'New cases 7-day mean',
+    #             'Deaths 7-day mean']
+    observations = observations.set_index('Date').copy()
     observations[plot_what].plot(ax=ax, marker='o', ls='',
                                         markersize=2)
     ax.set_yscale('log')
@@ -58,7 +60,7 @@ def plot_simulations(sims, observations, ax=None):
     #plt.xticks(rotation=90)
     return pivot_plot_data(plot_data)
 
-def explore_simulation(initial_growth_rate,
+def explore_simulation(initial_R_0,
 		       serial_interval,
 		       latent_fraction,
 		       cdr, cfr,
@@ -71,7 +73,6 @@ def explore_simulation(initial_growth_rate,
                        weights,
                        observations,
                        day_zero):
-    initial_growth_rate /= 100
     cdr /= 100
     cfr /= 100
     cv_detect /= 100
@@ -91,26 +92,26 @@ def explore_simulation(initial_growth_rate,
         print('Lockdown cannot be released before April 2020')
         return
 
-    SEIRObs_parameters = SEIRModel.calibrate_parameters(initial_growth_rate,
-                                                        serial_interval,
-                                                        latent_fraction)
+    SEIRObs_parameters = {'R_0': initial_R_0,
+                          'T_inc': serial_interval * latent_fraction,
+                          'T_inf': serial_interval * (1. - latent_fraction)}
     SEIRObs_parameters.update({'cdr': cdr, 'cfr': cfr,
                                'cv_detect': cv_detect, 'T_detect': T_detect,
                                'cv_recover': cv_recover, 'T_recover': T_recover,
                                'cv_death': cv_death, 'T_death': T_death,
                                'initial_state': SEIR.make_state(S=6.64e7, I=1),
-                               'T_start':0})
+                               'T_start':-10})
     ld_model = SEIRObsModel(**SEIRObs_parameters)
     R_0_ld = pw_linear_fn(dt_to_number(pd.to_datetime(['2020/03/10',
-                                                       '2020/03/26',
+                                                       '2020/03/24',
                                                        lockdown_release_date,
                                                        lockdown_release_end]),
                                        day_zero),
                           [ld_model.R_0(0), R_0_lockdown, R_0_lockdown,
                            ld_model.R_0(0)])
     ld_model.R_0 = R_0_ld
-    ld_model.fit(observations['Daily new cases'], None,
-                 observations['Daily deaths'], weights=weights)
+    ld_model.fit(observations['Daily new cases'].dropna(), None,
+                 observations['Daily deaths'].dropna(), weights=weights)
     sim_ld = pd.DataFrame(ld_model.simulate(7*sim_time_weeks)).set_index('t')
     sim_ld.index = number_to_dt(sim_ld.index, day_zero).rename('Date')
     _, (axt, axb) = plt.subplots(2, 1, figsize=(12, 16),
@@ -150,26 +151,26 @@ def my_text_box(value, mymin, mymax, step, description):
 def interactive_simulation(observations, day_zero):
     return interactive(explore_simulation,
                        {'manual':True},
-                       initial_growth_rate = my_slider(26, 5, 50, 1, 'Initial growth rate, %'),
+                       initial_R_0 = my_slider(2.9, 0.1, 4.0, 0.05, 'Initial $R_0$'),
                        serial_interval = my_slider(6.5, 2, 10, 0.5, 'Mean serial interval, days'),
                        latent_fraction = my_slider(0.71, 0.1, 0.9, 0.1, 'Latent period fraction'),
                        cdr = my_slider(4.4, 0.1, 10, 0.1, 'Case detection rate, %'),
-                       cfr = my_slider(33, 1, 100, 1, 'Case fatality rate, %'),
-                       T_detect = my_slider(11, 1, 30, 1, 'Time to detection, days'),
+                       cfr = my_slider(22, 1, 100, 1, 'Case fatality rate, %'),
+                       T_detect = my_slider(20, 1, 30, 1, 'Time to detection, days'),
                        T_recover = my_slider(9, 1, 30, 1, 'Time to recovery, days'),
-                       T_death = my_slider(10, 1, 56, 1, 'Time to death, days'),
+                       T_death = my_slider(4, 1, 56, 1, 'Time to death, days'),
                        cv_detect = my_slider(33, 1, 99, 1, 'Detection time variability, %'),
                        cv_recover = my_slider(33, 1, 99, 1, 'Recovery time variability, %'),
                        cv_death = my_slider(20, 1, 99, 1, 'Death time variability, %'),
-		       R_0_lockdown = my_slider(1.2, 0.1, 4, 0.1, '$R_0$ during lockdown'),
-                       lockdown_release_date = Text(value='2020/06/30',
+		       R_0_lockdown = my_slider(0.8, 0.1, 4, 0.05, '$R_0$ during lockdown'),
+                       lockdown_release_date = Text(value='2020/05/30',
                                                     description='Lockdown release date',
                                                     style={'description_width': 'initial'}),
                        
                        lockdown_release_timeframe_weeks = my_text_box(26, 1, 9999, 1, 'Number of weeks for lockdown release'),
                        sim_time_weeks = my_text_box(52, 1, 999, 1, 'Simulation length, weeks'),
-                       weights = Dropdown(options=[('Cases', [1, 0, 0]),
-                                                   ('Deaths', [0, 0, 1]),
+                       weights = Dropdown(options=[('Deaths', [0.01, 0, 1]),
+                                                   ('Cases', [1, 0, 0.01]),
                                                    ('Cases & deaths',
                                                     [.5, 0, .5])],
                                           description='Fit to ',
