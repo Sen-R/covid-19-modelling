@@ -66,7 +66,7 @@ def explore_simulation(initial_R_0,
 		       cdr, cfr,
 		       T_detect, T_recover, T_death,
 		       cv_detect, cv_recover, cv_death,
-		       R_0_lockdown,
+		       R_0_lockdown, R_0_final,
                        lockdown_release_date,
                        lockdown_release_timeframe_weeks,
                        sim_time_weeks,
@@ -108,7 +108,7 @@ def explore_simulation(initial_R_0,
                                                        lockdown_release_end]),
                                        day_zero),
                           [ld_model.R_0(0), R_0_lockdown, R_0_lockdown,
-                           ld_model.R_0(0)])
+                           R_0_final])
     ld_model.R_0 = R_0_ld
     ld_model.fit(observations['Daily new cases'].dropna(), None,
                  observations['Daily deaths'].dropna(), weights=weights)
@@ -163,7 +163,8 @@ def interactive_simulation(observations, day_zero):
                        cv_recover = my_slider(33, 1, 99, 1, 'Recovery time variability, %'),
                        cv_death = my_slider(20, 1, 99, 1, 'Death time variability, %'),
 		       R_0_lockdown = my_slider(0.8, 0.1, 4, 0.05, '$R_0$ during lockdown'),
-                       lockdown_release_date = Text(value='2020/05/30',
+		       R_0_final = my_slider(2., 0.1, 4, 0.05, '$R_0$ after lockdown'),
+                       lockdown_release_date = Text(value='2020/05/31',
                                                     description='Lockdown release date',
                                                     style={'description_width': 'initial'}),
                        
