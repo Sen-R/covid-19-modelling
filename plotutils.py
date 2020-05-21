@@ -66,9 +66,9 @@ def explore_simulation(initial_R_0,
 		       cdr, cfr,
 		       T_detect, T_recover, T_death,
 		       cv_detect, cv_recover, cv_death,
-		       R_0_lockdown, R_0_final,
-                       lockdown_release_date,
-                       lockdown_release_timeframe_weeks,
+		       R_0_lockdown,
+                       R_0_step_1, R_0_step_2, R_0_step_3,
+                       step_1_date, step_2_date, step_3_date,
                        sim_time_weeks,
                        weights,
                        observations,
@@ -78,19 +78,14 @@ def explore_simulation(initial_R_0,
     cv_detect /= 100
     cv_recover /= 100
     cv_death /= 100
-    
-    try:
-        lockdown_release_date = pd.to_datetime(lockdown_release_date)
-    except (TypeError, ValueError) as e:
-        print('Error understanding lockdown release date:\n')
-        print(e)
-        return
-    lockdown_release_end = (lockdown_release_date +
-                            pd.to_timedelta(7*lockdown_release_timeframe_weeks,
-                                            'D'))
-    if lockdown_release_date < pd.to_datetime('20/04/01'):
-        print('Lockdown cannot be released before April 2020')
-        return
+
+    #for d in ['step_1_date', 'step_2_date', 'step_3_date']:
+    #    try:
+    #        locals()[d] = pd.to_datetime(locals()[d])
+    #    except (TypeError, ValueError) as e:
+    #        print('Error understanding {}:\n'.format(d))
+    #        print(e)
+    #        return
 
     SEIRObs_parameters = {'R_0': initial_R_0,
                           'T_inc': serial_interval * latent_fraction,
@@ -104,11 +99,16 @@ def explore_simulation(initial_R_0,
     ld_model = SEIRObsModel(**SEIRObs_parameters)
     R_0_ld = pw_linear_fn(dt_to_number(pd.to_datetime(['2020/03/10',
                                                        '2020/03/24',
-                                                       lockdown_release_date,
-                                                       lockdown_release_end]),
+                                                       step_1_date,
+                                                       step_1_date,                                                
+                                                       step_2_date,
+                                                       step_2_date,
+                                                       step_3_date,
+                                                       step_3_date]),
                                        day_zero),
                           [ld_model.R_0(0), R_0_lockdown, R_0_lockdown,
-                           R_0_final])
+                           R_0_step_1, R_0_step_1, R_0_step_2, R_0_step_2,
+                           R_0_step_3])
     ld_model.R_0 = R_0_ld
     ld_model.fit(observations['Daily new cases'].dropna(), None,
                  observations['Daily deaths'].dropna(), weights=weights)
@@ -127,12 +127,13 @@ def explore_simulation(initial_R_0,
                                  observations,
                                  ax=axb)
     axb.set_title('Projections')
-    for ax in (axt, axb):
-        ax.axvspan(pd.to_datetime('2020/03/10'),
-                   pd.to_datetime('2020/03/26'), color='orange', alpha=0.03)
-        ax.axvspan(pd.to_datetime('2020/03/26'),
-                   lockdown_release_date, color='r', alpha=0.04)
-        ax.axvspan(lockdown_release_date, lockdown_release_end, color='g', alpha=0.05)
+    #for ax in (axt, axb):
+    #    ax.axvspan(pd.to_datetime('2020/03/10'),
+    #               pd.to_datetime('2020/03/26'), color='orange', alpha=0.03)
+    #    ax.axvspan(pd.to_datetime('2020/03/26'),
+    #               pd.to_datetime(step_1_date), color='r', alpha=0.04),
+    #    ax.axvspan(pd.to_datetime(step_1_date), pd.to_datetime(step_2_date),
+    #               color='g', alpha=0.05)
     plt.subplots_adjust(hspace=0.5)
     plot_data.to_csv('simdata/last-simulation.csv')
     return plot_data
@@ -155,7 +156,7 @@ def interactive_simulation(observations, day_zero):
                        serial_interval = my_slider(6.5, 2, 10, 0.5, 'Mean serial interval, days'),
                        latent_fraction = my_slider(0.71, 0.1, 0.9, 0.1, 'Latent period fraction'),
                        cdr = my_slider(4.4, 0.1, 10, 0.1, 'Case detection rate, %'),
-                       cfr = my_slider(22, 1, 100, 1, 'Case fatality rate, %'),
+                       cfr = my_slider(20, 1, 100, 1, 'Case fatality rate, %'),
                        T_detect = my_slider(20, 1, 30, 1, 'Time to detection, days'),
                        T_recover = my_slider(9, 1, 30, 1, 'Time to recovery, days'),
                        T_death = my_slider(4, 1, 56, 1, 'Time to death, days'),
@@ -163,12 +164,18 @@ def interactive_simulation(observations, day_zero):
                        cv_recover = my_slider(33, 1, 99, 1, 'Recovery time variability, %'),
                        cv_death = my_slider(20, 1, 99, 1, 'Death time variability, %'),
 		       R_0_lockdown = my_slider(0.8, 0.1, 4, 0.05, '$R_0$ during lockdown'),
-		       R_0_final = my_slider(2., 0.1, 4, 0.05, '$R_0$ after lockdown'),
-                       lockdown_release_date = Text(value='2020/05/31',
-                                                    description='Lockdown release date',
-                                                    style={'description_width': 'initial'}),
-                       
-                       lockdown_release_timeframe_weeks = my_text_box(26, 1, 9999, 1, 'Number of weeks for lockdown release'),
+                       R_0_step_1 = my_slider(0.9, 0.1, 4, 0.05, '$R_0$ during release step 1'),
+                       R_0_step_2 = my_slider(1., 0.1, 4, 0.05, '$R_0$ during release step 2'),
+                       R_0_step_3 = my_slider(1.2, 0.1, 4, 0.05, '$R_0$ during release step 3'),
+                       step_1_date = Text(value='2020/05/11',
+                                          description='Lockdown release date',
+                                          style={'description_width': 'initial'}),
+                       step_2_date = Text(value='2020/06/01',
+                                          description='Lockdown release date',
+                                          style={'description_width': 'initial'}),
+                       step_3_date = Text(value='2020/07/04',
+                                          description='Lockdown release date',
+                                          style={'description_width': 'initial'}),
                        sim_time_weeks = my_text_box(52, 1, 999, 1, 'Simulation length, weeks'),
                        weights = Dropdown(options=[('Deaths', [0.01, 0, 1]),
                                                    ('Cases', [1, 0, 0.01]),
